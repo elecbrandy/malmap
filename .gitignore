@@ -1,0 +1,43 @@
+# ── 원본 데이터 ──────────────────────────────────────────
+_data/
+
+# 파이프라인 중간 산출물
+pipeline/output/
+
+
+# ── 환경설정 ─────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+
+# ── Python ───────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+
+
+# ── Node / React ─────────────────────────────────────────
+node_modules/
+frontend/dist/
+frontend/build/
+.next/
+
+
+# ── OS ───────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+
+# ── IDE ──────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
