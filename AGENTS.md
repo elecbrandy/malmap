@@ -101,8 +101,10 @@ def score_guess(guess_vector: list[float], answer_vector: list[float]) -> float:
 
 핵심 재미를 먼저 검증하고 시각화는 나중에 얹는다. 앞 단계를 건너뛰지 않는다.
 
-- **M1**: 파이프라인 → DB 적재 (임베딩까지)
-- **M2**: `/guess` API + curl 테스트
+- **M1**: 파이프라인 → DB 적재 (임베딩까지) — 완료
+- **M2**: `/guess` API + curl 테스트 — 완료
+  - FastAPI `/guess`는 모든 sense를 pgvector SQL로 채점하고, 사전 밖 추측은 동일한 E5 모델로 임베딩해 `on_map=false` entry로 캐싱한다.
+  - 사전 단어·동음이의어·사전 밖 단어의 curl 검증과 API 단위 테스트를 마쳤다.
 - **M3**: React 검색창 + 텍스트 결과만 (지도 없이) — **여기서 게임이 재밌는지 판단**
 - **M4**: 지도 렌더링 + 카메라 이동
 - **M5**: 지도 밖 스택 + 동음이의어 다중 타일
