@@ -8,6 +8,7 @@
     sense_no    (int)  의미 번호 (1부터 시작)
     definition  (str)  한국어 뜻풀이
     pos         (str)  품사 (이 단계에서는 "명사"만 통과)
+    vocabulary_level (str) 국립국어원 어휘 등급 (초급/중급/고급/없음)
     usage       (str)  예문 첫 번째 문장형 예시. 없으면 빈 문자열.
 
 실행:
@@ -22,7 +23,7 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger(__name__)
 
 # ── 경로 설정 ────────────────────────────────────────────
-DATA_DIR = Path("data/krdict")
+DATA_DIR = Path("_data/korean")
 OUTPUT_DIR = Path("pipeline/output")
 OUTPUT_FILE = OUTPUT_DIR / "entries_raw.jsonl"
 
@@ -89,6 +90,25 @@ def _extract_usage(sense_examples: list) -> str:
     return phrase_fallback
 
 
+def _extract_word(lemma: dict | list) -> str:
+    """Lemma 구조에서 대표 표기(writtenForm)를 추출한다.
+
+    한국어기초사전은 표제어가 하나면 딕셔너리, 이형태가 함께 있으면
+    리스트로 제공한다. 대표 표기만 게임의 entry 표기로 사용한다.
+
+    Args:
+        lemma: 단일 Lemma 딕셔너리 또는 Lemma 딕셔너리의 리스트.
+
+    Returns:
+        대표 표기. writtenForm이 없으면 빈 문자열.
+    """
+    for lemma_item in _to_list(lemma):
+        word = _get_feat_val(lemma_item.get("feat", {}), "writtenForm")
+        if word:
+            return word.strip()
+    return ""
+
+
 def _parse_entry(entry: dict) -> list[dict]:
     """LexicalEntry 하나를 파싱해 entry 딕셔너리 리스트로 반환한다.
 
@@ -106,9 +126,10 @@ def _parse_entry(entry: dict) -> list[dict]:
     pos = _get_feat_val(entry_feats, "partOfSpeech")
     if pos not in ALLOWED_POS:
         return []
+    vocabulary_level = _get_feat_val(entry_feats, "vocabularyLevel") or "없음"
 
     # 표기
-    word = entry.get("Lemma", {}).get("feat", {}).get("val", "").strip()
+    word = _extract_word(entry.get("Lemma", {}))
     if not word or word in EXCLUDE_WORDS:
         return []
 
@@ -141,6 +162,7 @@ def _parse_entry(entry: dict) -> list[dict]:
             "sense_no": sense_no,
             "definition": definition,
             "pos": pos,
+            "vocabulary_level": vocabulary_level,
             "usage": usage,
         })
 

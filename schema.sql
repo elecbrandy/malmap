@@ -24,6 +24,7 @@ CREATE TABLE entries (
     sense_no    INT       NOT NULL,           -- 표제어 내 의미 번호 (1, 2, ...)
     definition  TEXT      NOT NULL,           -- 뜻풀이 전문
     pos         TEXT      NOT NULL,           -- 품사 (명사로 필터링되어 들어옴)
+    vocabulary_level TEXT NOT NULL DEFAULT '없음', -- 국립국어원 어휘 등급
     frequency   INT,                          -- 사용 빈도 (필터링/정렬용, 없으면 NULL)
 
     -- 임베딩 차원(768)은 사용하는 모델에 종속된다.
@@ -48,13 +49,9 @@ CREATE INDEX entries_word_idx ON entries (word);
 -- 지도 데이터(GET /map)를 빠르게 뽑기 위한 부분 인덱스.
 CREATE INDEX entries_on_map_idx ON entries (on_map) WHERE on_map = TRUE;
 
--- 벡터 유사도 검색용 ivfflat 인덱스 (코사인 거리).
--- 주의: ivfflat은 데이터가 어느 정도 적재된 뒤 생성해야 품질이 좋다.
---       파이프라인에서 대량 적재를 끝낸 뒤 이 인덱스를 만드는 것을 권장한다.
---       (여기서는 스키마 정의를 한곳에 두기 위해 함께 선언하되,
---        대량 적재 전이라면 5_load.py에서 재생성하는 방식도 가능하다.)
-CREATE INDEX entries_embedding_idx ON entries
-    USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+-- M1의 /guess는 word로 찾은 소수 entry와 answer를 비교하므로 벡터 최근접
+-- 이웃 인덱스가 필요 없다. 이후 전체 벡터 최근접 검색이 실제 병목이 되면
+-- 데이터 적재 후 ivfflat 인덱스를 추가한다.
 
 
 -- ── daily_answers: 그날의 정답 ───────────────────────────

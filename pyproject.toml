@@ -4,11 +4,14 @@ version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
     # ── pipeline ──────────────────────────────────────────
-    # 3_embed.py에서 추가 예정: sentence-transformers, umap-learn
-    # 5_load.py에서 추가 예정: psycopg[binary]
-
+    # 3_embed.py: 문장 임베딩 / 4_project.py: UMAP 좌표와 산포도
+    # 5_load.py: Supabase(PostgreSQL) 적재
     # ── backend ───────────────────────────────────────────
     # M2에서 추가 예정: fastapi, uvicorn, psycopg[binary], pgvector
+    "sentence-transformers>=6.0.1",
+    "umap-learn>=0.5.7",
+    "matplotlib>=3.10.0",
+    "psycopg[binary]>=3.2.0",
 ]
 
 [tool.ruff]

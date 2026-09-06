@@ -9,15 +9,15 @@
 기억할 것 세 가지:
 
 1. **엔트리 단위는 "단어"가 아니라 "단어 + 뜻".** 동음이의어("밤"=night/chestnut)는 각각 별도 엔트리이고, 뜻풀이 문장을 임베딩해 지도상 다른 위치에 놓는다.
-2. **지도에 있는 단어와 없는 단어가 구분된다.** 전체 사전(유사도 계산용, 수만 개) 중 일부만 지도 좌표를 갖는다(수백~1천여 개). 나머지는 점수만 매겨 스택에 표시.
-3. **매일 정답이 바뀐다.** 지도 위 엔트리 중 하나가 그날의 정답.
+2. **지도에 있는 단어와 없는 단어가 구분된다.** 전체 사전(유사도 계산용, 수만 개) 중 10,000개만 지도 좌표를 갖는다. 나머지는 점수만 매겨 스택에 표시.
+3. **매일 정답이 바뀐다.** 지도 위 엔트리 중 하나를 entry 단위로 균등 무작위 선택한다.
 
 ## 기술 스택
 
 - 백엔드: FastAPI (Python)
 - 프론트엔드: React (TypeScript)
-- DB: PostgreSQL + pgvector (개발: 로컬 도커 / 배포: Oracle Always Free VM에 직접 설치)
-- 임베딩: 로컬 Hugging Face sentence-transformers. **라이선스 apache-2.0/mit 명시 모델만.** 사전에 없는 단어는 런타임 임베딩 후 캐싱.
+- DB: Supabase PostgreSQL + pgvector. 스키마는 Supabase SQL Editor에서 실행하고, 파이프라인은 `DATABASE_URL`로 연결한다. IPv6을 쓸 수 있으면 직접 연결을 우선하고, IPv4 환경에서는 session pooler를 쓴다.
+- 임베딩: 로컬 Hugging Face `intfloat/multilingual-e5-base` (MIT, 768차원) + sentence-transformers. 모든 저장 entry는 `query: 표제어: 뜻풀이` 형식으로 L2 정규화해 임베딩한다. 사전에 없는 단어는 반드시 같은 모델로 런타임 임베딩 후 캐싱.
 - 데이터: 국립국어원 (공공누리 라이선스 확인 후)
 
 ## 구조
@@ -34,7 +34,7 @@ malmap/
 ```
 
 작업 영역별로 해당 지침을 먼저 읽는다:
-- 파이프라인(파싱/필터/임베딩/좌표/적재) → `docs/rules/data-pipeline.md`
+- 파이프라인(파싱/임베딩/좌표/적재) → `docs/rules/data-pipeline.md`
 - 백엔드(라우터/채점/pgvector) → `docs/rules/backend.md`
 - 프론트(지도/카메라/타일/상태) → `docs/rules/frontend.md`
 
@@ -66,6 +66,24 @@ def score_guess(guess_vector: list[float], answer_vector: list[float]) -> float:
 - 에러를 조용히 삼키지 않는다(`except: pass`, 빈 `catch {}` 금지). 사용자용 메시지는 한국어.
 - 한 번에 한 가지만 바꾼다. 요청 안 한 파일을 "김에" 고치지 않는다.
 
+## M1 파이프라인과 DB
+
+현재 M1은 별도 필터 단계 없이 파서의 최소 검증만 사용한다. 파서가 명사가 아닌 entry, 의존 명사 목록, 빈 뜻풀이, 중복 `(word, sense_no)`를 제거하므로 `2_filter.py`는 만들지 않는다.
+
+```text
+국립국어원 JSON
+  → 1_parse.py → entries_raw.jsonl
+  → 3_embed.py → entries_embedded.jsonl
+  → 4_project.py → entries_with_coords.jsonl + map_scatter.png
+  → 5_load.py → Supabase entries
+```
+
+- `vocabulary_level`은 국립국어원 원본의 `초급`/`중급`/`고급`/`없음` 값을 raw JSONL에 기록하고, 이후 임베딩·좌표 단계는 이 메타데이터를 보존한다.
+- 지도 entry는 고정한다. 초급·중급 entry 전체 8,918개에 시드 고정으로 뽑은 고급 entry 1,082개를 더해 정확히 10,000개로 만든다. `없음`은 지도와 answer 후보에서 제외한다.
+- UMAP은 이 10,000개 벡터에만 `metric="cosine"`, 고정 `random_state`로 실행한다. 2D 좌표는 이웃 힌트일 뿐이고, 정답과의 정확한 관계는 원래 768차원 공간의 similarity가 담당한다. 지도 좌표를 매일 다시 만들지 않는다.
+- `5_load.py`는 `entries_with_coords.jsonl`을 임시 staging 테이블에 `COPY`로 적재한 뒤 `(word, sense_no)` 기준으로 upsert한다. M1의 `/guess`는 word 조회 후 소수 entry만 answer와 비교하므로 ivfflat 인덱스를 만들지 않는다. 전체 벡터 최근접 검색이 측정된 병목일 때만 적재 후 추가한다.
+- Supabase 연결 문자열은 `DATABASE_URL` 환경 변수로만 전달한다. 코드·Git·공유 문서에 비밀값을 넣지 않는다.
+
 ## 용어 사전 (코드/DB/API 전체 통일)
 
 | 용어 | 의미 | 쓰지 말 것 |
@@ -75,6 +93,7 @@ def score_guess(guess_vector: list[float], answer_vector: list[float]) -> float:
 | guess | 유저가 검색한 추측 | query, search |
 | similarity | 코사인 유사도 (-1~1) | score, distance |
 | on_map | 지도 좌표 보유 여부 | visible, placed |
+| vocabulary_level | 국립국어원 어휘 등급 | level, difficulty |
 | answer | 그날의 정답 엔트리 | target, solution |
 | daily / play_date | 일일 라운드 / 게임 날짜 | round |
 
