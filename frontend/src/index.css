@@ -1,0 +1,12 @@
+:root {
+  font-family: "Pretendard", "Noto Sans KR", system-ui, sans-serif;
+  color: #1d2b25;
+  background: #f6f7f3;
+  font-synthesis: none;
+}
+
+* { box-sizing: border-box; }
+
+body { margin: 0; min-width: 320px; min-height: 100vh; }
+
+button, input { font: inherit; }
