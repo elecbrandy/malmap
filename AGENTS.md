@@ -9,7 +9,7 @@
 기억할 것 세 가지:
 
 1. **엔트리 단위는 "단어"가 아니라 "단어 + 뜻".** 동음이의어("밤"=night/chestnut)는 각각 별도 엔트리이고, 뜻풀이 문장을 임베딩해 지도상 다른 위치에 놓는다.
-2. **지도에 있는 단어와 없는 단어가 구분된다.** 전체 사전(유사도 계산용, 수만 개) 중 10,000개만 지도 좌표를 갖는다. 나머지는 점수만 매겨 스택에 표시.
+2. **전체 사전 entry가 지도 좌표를 갖는다.** 화면에는 발견한 entry만 표시하며, 사전에 없는 런타임 추측만 `on_map=false`로 스택에 표시한다.
 3. **매일 정답이 바뀐다.** 지도 위 엔트리 중 하나를 entry 단위로 균등 무작위 선택한다.
 
 ## 기술 스택
@@ -68,7 +68,7 @@ def score_guess(guess_vector: list[float], answer_vector: list[float]) -> float:
 
 ## M1 파이프라인과 DB
 
-현재 M1은 별도 필터 단계 없이 파서의 최소 검증만 사용한다. 파서가 명사가 아닌 entry, 의존 명사 목록, 빈 뜻풀이, 중복 `(word, sense_no)`를 제거하므로 `2_filter.py`는 만들지 않는다.
+현재 M1은 별도 필터 단계 없이 파서의 최소 검증만 사용한다. 파서가 명사가 아닌 entry, 의존 명사 목록, 빈 뜻풀이, 중복 `(word, definition)`을 제거하고 표제어별 `sense_no`를 다시 부여하므로 `2_filter.py`는 만들지 않는다.
 
 ```text
 국립국어원 JSON
@@ -79,8 +79,8 @@ def score_guess(guess_vector: list[float], answer_vector: list[float]) -> float:
 ```
 
 - `vocabulary_level`은 국립국어원 원본의 `초급`/`중급`/`고급`/`없음` 값을 raw JSONL에 기록하고, 이후 임베딩·좌표 단계는 이 메타데이터를 보존한다.
-- 지도 entry는 고정한다. 초급·중급 entry 전체 8,918개에 시드 고정으로 뽑은 고급 entry 1,082개를 더해 정확히 10,000개로 만든다. `없음`은 지도와 answer 후보에서 제외한다.
-- UMAP은 이 10,000개 벡터에만 `metric="cosine"`, 고정 `random_state`로 실행한다. 2D 좌표는 이웃 힌트일 뿐이고, 정답과의 정확한 관계는 원래 768차원 공간의 similarity가 담당한다. 지도 좌표를 매일 다시 만들지 않는다.
+- 전체 사전 entry에 고정 지도 좌표를 부여한다. 사전에 없는 런타임 추측만 `on_map=false`로 캐싱한다.
+- UMAP은 전체 사전 벡터에 `metric="cosine"`, 고정 `random_state`로 실행한다. 2D 좌표는 이웃 힌트일 뿐이고, 정답과의 정확한 관계는 원래 768차원 공간의 similarity가 담당한다. 지도 좌표를 매일 다시 만들지 않는다.
 - `5_load.py`는 `entries_with_coords.jsonl`을 임시 staging 테이블에 `COPY`로 적재한 뒤 `(word, sense_no)` 기준으로 upsert한다. M1의 `/guess`는 word 조회 후 소수 entry만 answer와 비교하므로 ivfflat 인덱스를 만들지 않는다. 전체 벡터 최근접 검색이 측정된 병목일 때만 적재 후 추가한다.
 - Supabase 연결 문자열은 `DATABASE_URL` 환경 변수로만 전달한다. 코드·Git·공유 문서에 비밀값을 넣지 않는다.
 

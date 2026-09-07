@@ -1,6 +1,8 @@
 import { FormEvent, useRef, useState } from "react";
 
 import { submitGuess, type ScoredEntry } from "./api/client";
+import MapCanvas, { type CameraTarget } from "./MapCanvas";
+import { formatScaledSimilarity } from "./similarity";
 import "./App.css";
 
 type GuessResult = {
@@ -8,16 +10,24 @@ type GuessResult = {
   entries: ScoredEntry[];
 };
 
-function formatSimilarity(similarity: number): string {
-  return Math.min(1, Math.max(0, similarity)).toFixed(3);
-}
-
 function App() {
   const [guess, setGuess] = useState("");
   const [guessResults, setGuessResults] = useState<GuessResult[]>([]);
+  const [cameraTarget, setCameraTarget] = useState<CameraTarget | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const resultReferences = useRef(new Map<string, HTMLLIElement>());
+  const cameraRequestId = useRef(0);
+
+  function moveCameraTo(entries: ScoredEntry[]) {
+    const entry = entries.find(
+      (candidate) => candidate.on_map && candidate.map_x !== null && candidate.map_y !== null,
+    );
+    if (!entry) return;
+
+    cameraRequestId.current += 1;
+    setCameraTarget({ entry, requestId: cameraRequestId.current });
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -30,6 +40,7 @@ function App() {
 
     const existingResult = guessResults.find((result) => result.word === word);
     if (existingResult) {
+      moveCameraTo(existingResult.entries);
       resultReferences.current.get(word)?.scrollIntoView({ behavior: "smooth", block: "center" });
       setErrorMessage(null);
       return;
@@ -43,8 +54,10 @@ function App() {
       const sortedEntries = [...entries].sort(
         (firstEntry, secondEntry) => secondEntry.similarity - firstEntry.similarity,
       );
+      const highestEntry = sortedEntries.slice(0, 1);
+      moveCameraTo(highestEntry);
       setGuessResults((currentResults) =>
-        [...currentResults, { word, entries: sortedEntries }].sort(
+        [...currentResults, { word, entries: highestEntry }].sort(
           (firstResult, secondResult) =>
             (secondResult.entries[0]?.similarity ?? -1) -
             (firstResult.entries[0]?.similarity ?? -1),
@@ -86,6 +99,17 @@ function App() {
         {errorMessage && <p className="error-message" role="alert">{errorMessage}</p>}
       </section>
 
+      <section className="map-section" aria-label="의미 지도">
+        <div className="section-heading">
+          <h2>의미 지도</h2>
+          <span>{guessResults.flatMap((result) => result.entries).filter((entry) => entry.on_map).length}개 발견</span>
+        </div>
+        <MapCanvas
+          entries={guessResults.flatMap((result) => result.entries).filter((entry) => entry.on_map)}
+          cameraTarget={cameraTarget}
+        />
+      </section>
+
       <section className="results" aria-live="polite" aria-label="추측 결과">
         <div className="results-heading">
           <h2>추측 기록</h2>
@@ -97,7 +121,7 @@ function App() {
         ) : (
           <ol className="result-list">
             {guessResults.map(({ word, entries }) => {
-              const [primaryEntry, ...alternateEntries] = entries;
+              const [primaryEntry] = entries;
               if (!primaryEntry) return null;
 
               return (
@@ -107,7 +131,6 @@ function App() {
                   ref={(element) => {
                     if (element) resultReferences.current.set(word, element);
                   }}
-                  tabIndex={alternateEntries.length > 0 ? 0 : undefined}
                 >
                   <div className="entry-main">
                     <div className="entry-word">
@@ -116,37 +139,14 @@ function App() {
                     </div>
                     <p>{primaryEntry.definition}</p>
                     <div className="entry-side">
-                      <strong aria-label={`유사도 ${formatSimilarity(primaryEntry.similarity)}`}>
-                        {formatSimilarity(primaryEntry.similarity)}
+                      <strong aria-label={`유사도 ${formatScaledSimilarity(primaryEntry.similarity)}`}>
+                        {formatScaledSimilarity(primaryEntry.similarity)}
                       </strong>
                       <span className={primaryEntry.on_map ? "map-status on-map" : "map-status off-map"}>
                         {primaryEntry.on_map ? "지도" : "지도 밖"}
                       </span>
-                      {alternateEntries.length > 0 && (
-                        <span className="alternate-count">다른 뜻 {alternateEntries.length}개</span>
-                      )}
                     </div>
                   </div>
-
-                  {alternateEntries.length > 0 && (
-                    <div className="alternate-popup" role="tooltip">
-                      <h4>다른 뜻</h4>
-                      {alternateEntries.map((entry) => (
-                        <div className="alternate-sense" key={`${entry.word}-${entry.sense_no}`}>
-                          <div>
-                            <span>뜻 {entry.sense_no}</span>
-                            <span className="alternate-score">
-                              <strong>{formatSimilarity(entry.similarity)}</strong>
-                              <span className={entry.on_map ? "map-status on-map" : "map-status off-map"}>
-                                {entry.on_map ? "지도" : "지도 밖"}
-                              </span>
-                            </span>
-                          </div>
-                          <p>{entry.definition}</p>
-                        </div>
-                      ))}
-                    </div>
-                  )}
                 </li>
               );
             })}

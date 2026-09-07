@@ -48,27 +48,29 @@ def load_entries(input_file: Path) -> list[dict]:
             word = entry.get("word")
             definition = entry.get("definition")
             if not isinstance(word, str) or not isinstance(definition, str):
-                raise ValueError(
-                    f"{line_number}번째 줄에 word 또는 definition 문자열이 없습니다."
-                )
+                raise ValueError(f"{line_number}번째 줄에 word 또는 definition 문자열이 없습니다.")
             entries.append(entry)
 
     return entries
 
 
 def build_embedding_text(entry: dict) -> str:
-    """entry의 표제어와 뜻풀이로 E5 입력 문장을 만든다.
+    """entry의 뜻풀이와 용례로 E5 입력 문장을 만든다.
 
-    동음이의어를 분리하는 핵심은 뜻풀이이며, 짧은 표제어를 함께 넣어
-    뜻풀이가 지나치게 짧은 entry도 문맥을 잃지 않도록 한다.
+    모든 sense에 반복되는 표제어는 제외하고, 실제 의미를 설명하는
+    뜻풀이와 용례를 사용해 동음이의어의 문맥을 구분한다.
 
     Args:
         entry: word와 definition을 포함한 entry 딕셔너리.
 
     Returns:
-        E5 모델에 전달할 접두사 포함 입력 문장.
+        E5 모델에 전달할 접두사 포함 입력 문장. 용례가 없으면 뜻풀이만 포함한다.
     """
-    return f"query: {entry['word']}: {entry['definition']}"
+    embedding_text = f"query: {entry['definition']}"
+    usage = entry.get("usage", "").strip()
+    if usage:
+        embedding_text += f" 예문: {usage}"
+    return embedding_text
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -99,8 +101,7 @@ def main() -> None:
         from sentence_transformers import SentenceTransformer
     except ModuleNotFoundError as error:
         raise SystemExit(
-            "sentence-transformers가 필요합니다. "
-            "현재 가상환경에 설치한 뒤 다시 실행하세요."
+            "sentence-transformers가 필요합니다. 현재 가상환경에 설치한 뒤 다시 실행하세요."
         ) from error
 
     entries = load_entries(INPUT_FILE)

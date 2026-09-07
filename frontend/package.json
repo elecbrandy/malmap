@@ -11,9 +11,11 @@
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
+    "konva": "latest",
     "vite": "latest",
     "react": "latest",
-    "react-dom": "latest"
+    "react-dom": "latest",
+    "react-konva": "latest"
   },
   "devDependencies": {
     "@eslint/js": "latest",

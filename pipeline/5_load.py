@@ -9,8 +9,10 @@
 
 실행:
     uv run python pipeline/5_load.py
+    uv run python pipeline/5_load.py --coordinates-only
 """
 
+import argparse
 import json
 import logging
 import os
@@ -33,6 +35,18 @@ COPY_COLUMNS = (
     "map_x",
     "map_y",
 )
+COORDINATE_COPY_COLUMNS = ("word", "sense_no", "on_map", "map_x", "map_y")
+
+
+def parse_arguments() -> argparse.Namespace:
+    """명령줄 인자를 읽는다."""
+    parser = argparse.ArgumentParser(description="말맵 데이터를 Supabase에 적재")
+    parser.add_argument(
+        "--coordinates-only",
+        action="store_true",
+        help="기존 entry의 지도 여부와 좌표만 갱신",
+    )
+    return parser.parse_args()
 
 
 def serialize_embedding(embedding: list[float]) -> str:
@@ -124,6 +138,25 @@ def create_staging_table(cursor: object) -> None:
     )
 
 
+def create_coordinate_staging_table(cursor: object) -> None:
+    """지도 좌표 갱신용 임시 테이블을 만든다.
+
+    Args:
+        cursor: psycopg 데이터베이스 커서.
+    """
+    cursor.execute(
+        """
+        CREATE TEMP TABLE entry_coordinates_staging (
+            word TEXT NOT NULL,
+            sense_no INT NOT NULL,
+            on_map BOOLEAN NOT NULL,
+            map_x REAL,
+            map_y REAL
+        ) ON COMMIT DROP
+        """
+    )
+
+
 def copy_entries(cursor: object, input_file: Path) -> int:
     """JSONL entry를 임시 테이블에 COPY로 일괄 적재한다.
 
@@ -140,6 +173,37 @@ def copy_entries(cursor: object, input_file: Path) -> int:
         for row in iter_rows(input_file):
             copy.write_row(row)
             entry_count += 1
+    return entry_count
+
+
+def copy_coordinates(cursor: object, input_file: Path) -> int:
+    """좌표 정보만 임시 테이블에 COPY한다.
+
+    Args:
+        cursor: psycopg 데이터베이스 커서.
+        input_file: 좌표 포함 JSONL 파일 경로.
+
+    Returns:
+        임시 테이블에 쓴 entry 수.
+    """
+    copy_statement = (
+        f"COPY entry_coordinates_staging ({', '.join(COORDINATE_COPY_COLUMNS)}) FROM STDIN"
+    )
+    entry_count = 0
+    with cursor.copy(copy_statement) as copy:
+        with input_file.open(encoding="utf-8") as file:
+            for line in file:
+                entry = json.loads(line)
+                copy.write_row(
+                    (
+                        entry["word"],
+                        entry["sense_no"],
+                        entry["on_map"],
+                        entry.get("map_x"),
+                        entry.get("map_y"),
+                    )
+                )
+                entry_count += 1
     return entry_count
 
 
@@ -171,6 +235,26 @@ def upsert_entries(cursor: object) -> None:
     )
 
 
+def update_coordinates(cursor: object) -> None:
+    """기존 entry에 새 지도 좌표를 반영한다.
+
+    Args:
+        cursor: psycopg 데이터베이스 커서.
+    """
+    cursor.execute(
+        """
+        UPDATE entries AS entry
+        SET
+            on_map = staging.on_map,
+            map_x = staging.map_x,
+            map_y = staging.map_y
+        FROM entry_coordinates_staging AS staging
+        WHERE entry.word = staging.word
+          AND entry.sense_no = staging.sense_no
+        """
+    )
+
+
 def get_entry_counts(cursor: object) -> tuple[int, int]:
     """적재 후 전체 entry와 지도 entry 수를 조회한다.
 
@@ -180,15 +264,14 @@ def get_entry_counts(cursor: object) -> tuple[int, int]:
     Returns:
         전체 entry 수와 on_map=true entry 수.
     """
-    cursor.execute(
-        "SELECT count(*), count(*) FILTER (WHERE on_map) FROM entries"
-    )
+    cursor.execute("SELECT count(*), count(*) FILTER (WHERE on_map) FROM entries")
     entry_count, map_entry_count = cursor.fetchone()
     return entry_count, map_entry_count
 
 
 def main() -> None:
     """Supabase에 전체 entry를 idempotent하게 적재한다."""
+    arguments = parse_arguments()
     database_url = os.environ.get("DATABASE_URL")
     if not database_url:
         raise SystemExit("DATABASE_URL 환경 변수가 필요합니다.")
@@ -203,11 +286,15 @@ def main() -> None:
     log.info("입력 파일   : %s", INPUT_FILE)
     with psycopg.connect(database_url) as connection:
         with connection.cursor() as cursor:
-            create_staging_table(cursor)
-            copied_entry_count = copy_entries(cursor, INPUT_FILE)
+            if arguments.coordinates_only:
+                create_coordinate_staging_table(cursor)
+                copied_entry_count = copy_coordinates(cursor, INPUT_FILE)
+                update_coordinates(cursor)
+            else:
+                create_staging_table(cursor)
+                copied_entry_count = copy_entries(cursor, INPUT_FILE)
+                upsert_entries(cursor)
             log.info("임시 적재   : %d개 entry", copied_entry_count)
-
-            upsert_entries(cursor)
             total_entry_count, map_entry_count = get_entry_counts(cursor)
 
     log.info("DB 전체 entry: %d개", total_entry_count)

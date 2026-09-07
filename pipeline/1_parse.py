@@ -157,14 +157,16 @@ def _parse_entry(entry: dict) -> list[dict]:
         sense_examples = _to_list(sense.get("SenseExample", []))
         usage = _extract_usage(sense_examples)
 
-        results.append({
-            "word": word,
-            "sense_no": sense_no,
-            "definition": definition,
-            "pos": pos,
-            "vocabulary_level": vocabulary_level,
-            "usage": usage,
-        })
+        results.append(
+            {
+                "word": word,
+                "sense_no": sense_no,
+                "definition": definition,
+                "pos": pos,
+                "vocabulary_level": vocabulary_level,
+                "usage": usage,
+            }
+        )
 
     return results
 
@@ -182,15 +184,40 @@ def parse_file(json_path: Path) -> list[dict]:
         data = json.load(f)
 
     lexical_entries = _to_list(
-        data.get("LexicalResource", {})
-            .get("Lexicon", {})
-            .get("LexicalEntry", [])
+        data.get("LexicalResource", {}).get("Lexicon", {}).get("LexicalEntry", [])
     )
 
     results = []
     for entry in lexical_entries:
         results.extend(_parse_entry(entry))
     return results
+
+
+def deduplicate_and_renumber_entries(entries: list[dict]) -> list[dict]:
+    """같은 표제어의 서로 다른 뜻을 보존하고 sense 번호를 다시 부여한다.
+
+    Args:
+        entries: 원본 파일들에서 파싱한 전체 entry 목록.
+
+    Returns:
+        동일한 표제어와 뜻풀이만 중복 제거하고 sense_no를 다시 부여한 목록.
+    """
+    seen_definitions: set[tuple[str, str]] = set()
+    sense_counts: dict[str, int] = {}
+    unique_entries: list[dict] = []
+
+    for entry in entries:
+        word = entry["word"]
+        key = (word, entry["definition"])
+        if key in seen_definitions:
+            continue
+
+        seen_definitions.add(key)
+        sense_no = sense_counts.get(word, 0) + 1
+        sense_counts[word] = sense_no
+        unique_entries.append({**entry, "sense_no": sense_no})
+
+    return unique_entries
 
 
 def main() -> None:
@@ -207,23 +234,13 @@ def main() -> None:
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    total_entries = 0
-    total_raw = 0
-
     all_entries: list[dict] = []
     for json_path in json_files:
         entries = parse_file(json_path)
         all_entries.extend(entries)
         log.info("  %s → %d개 명사 entry", json_path.name, len(entries))
 
-    # (word, sense_no) 중복 제거 — 파일 간 중복이 있을 경우 대비
-    seen: set[tuple[str, int]] = set()
-    unique_entries: list[dict] = []
-    for entry in all_entries:
-        key = (entry["word"], entry["sense_no"])
-        if key not in seen:
-            seen.add(key)
-            unique_entries.append(entry)
+    unique_entries = deduplicate_and_renumber_entries(all_entries)
 
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         for entry in unique_entries:
